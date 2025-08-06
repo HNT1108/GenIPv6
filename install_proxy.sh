@@ -91,8 +91,7 @@ echo "[📄] Tạo file proxy.txt..."
 awk -F/ '{print $3 ":" $4 ":" $1 ":" $2}' $WORKDATA > proxy.txt
 
 echo "[☁️] Upload proxy.txt lên transfer.sh..."
-PASS=$(random_str)
-zip --password $PASS proxy.zip proxy.txt
+zip --password "$PASS" proxy.zip proxy.txt
 URL=$(curl --upload-file proxy.zip https://transfer.sh/proxy.zip)
 
 echo
