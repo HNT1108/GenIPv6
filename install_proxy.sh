@@ -13,7 +13,7 @@ git clone https://github.com/z3APA3A/3proxy.git
 cd 3proxy
 make -f Makefile.Linux
 mkdir -p /usr/local/etc/3proxy/bin
-cp src/3proxy /usr/local/etc/3proxy/bin/
+cp bin/3proxy /usr/local/etc/3proxy/bin/
 
 # ----------------- Thư mục làm việc -----------------
 WORKDIR="/home/proxy-installer"
