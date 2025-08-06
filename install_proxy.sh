@@ -2,138 +2,113 @@
 
 set -e
 
-# ===== CONFIG =====
-PROXY_COUNT=0
-PROXY_PORT_START=10000
-INSTALL_DIR="/opt/3proxy"
-WORK_DIR="/opt/proxygen"
-BIN_DIR="/usr/local/bin"
-IPV6_INTERFACE="eth0"
+echo "[🔧] Đang cài đặt gói cần thiết..."
+dnf install -y git curl gcc make net-tools zip > /dev/null
 
-# ===== FUNCTIONS =====
-random() {
-  tr -dc A-Za-z0-9 </dev/urandom | head -c5
-  echo
-}
+echo "[⬇️] Tải và biên dịch 3proxy mới nhất..."
+cd /opt || exit 1
+rm -rf 3proxy
+git clone https://github.com/z3APA3A/3proxy.git
+cd 3proxy
+make -f Makefile.Linux
+mkdir -p /usr/local/etc/3proxy/bin
+cp bin/3proxy /usr/local/etc/3proxy/bin/
 
-ip64() {
-  printf "%x%x:%x%x" $((RANDOM%16)) $((RANDOM%16)) $((RANDOM%16)) $((RANDOM%16))
-}
-
-gen_ipv6() {
-  echo "$1:$(ip64):$(ip64):$(ip64):$(ip64)"
-}
-
-gen_data() {
-  for i in $(seq 0 $((PROXY_COUNT-1))); do
-    port=$((PROXY_PORT_START+i))
-    user="usr$(random)"
-    pass="pass$(random)"
-    ipv6=$(gen_ipv6 "$IPV6_PREFIX")
-    echo "$user/$pass/$IPV4/$port/$ipv6"
-  done > "$WORK_DIR/data.txt"
-}
-
-gen_config_3proxy() {
-  cat > "$INSTALL_DIR/3proxy.cfg" <<EOF
-daemon
-maxconn 1000
-auth strong
-users $(awk -F"/" '{print $1":CL:"$2}' "$WORK_DIR/data.txt" | paste -sd" ")
-$(awk -F"/" '{print "auth strong\nallow "$1"\nproxy -6 -n -a -p"$4" -i"$3" -e"$5"\nflush\n"}' "$WORK_DIR/data.txt")
-EOF
-}
-
-gen_ifconfig_commands() {
-  awk -F"/" -v iface="$IPV6_INTERFACE" '{print "ip -6 addr add "$5"/64 dev "iface}' "$WORK_DIR/data.txt" > "$WORK_DIR/assign_ipv6.sh"
-  chmod +x "$WORK_DIR/assign_ipv6.sh"
-}
-
-gen_firewall_rules() {
-  awk -F"/" '{print "firewall-cmd --permanent --add-port="$4"/tcp"}' "$WORK_DIR/data.txt" > "$WORK_DIR/firewall.sh"
-  chmod +x "$WORK_DIR/firewall.sh"
-}
-
-gen_proxy_txt() {
-  awk -F"/" '{print $3":"$4":"$1":"$2}' "$WORK_DIR/data.txt" > "$WORK_DIR/proxy.txt"
-}
-
-upload_to_transfersh() {
-  PASS=$(random)
-  zip -P "$PASS" -j "$WORK_DIR/proxy.zip" "$WORK_DIR/proxy.txt"
-  URL=$(curl --silent --upload-file "$WORK_DIR/proxy.zip" "https://transfer.sh/proxy.zip")
-  echo "[✅] Proxy upload thành công!"
-  echo "🔗 Link tải: $URL"
-  echo "🔐 Mật khẩu giải nén: $PASS"
-}
-
-install_requirements() {
-  echo "[🔧] Đang cài đặt gói cần thiết..."
-  dnf install -y git make gcc curl zip >/dev/null
-}
-
-install_3proxy() {
-  echo "[⬇️] Tải và biên dịch 3proxy mới nhất..."
-  rm -rf "$INSTALL_DIR"
-  git clone https://github.com/z3APA3A/3proxy.git "$INSTALL_DIR"
-  make -C "$INSTALL_DIR" -f Makefile.Linux
-  ln -sf "$INSTALL_DIR/bin/3proxy" /usr/local/bin/3proxy
-}
-
-create_systemd_service() {
-  cat > /etc/systemd/system/3proxy.service <<EOF
+echo "[🛠️] Tạo systemd service cho 3proxy..."
+cat > /etc/systemd/system/3proxy.service <<EOF
 [Unit]
 Description=3proxy Proxy Server
 After=network.target
 
 [Service]
-ExecStart=/usr/local/bin/3proxy $INSTALL_DIR/3proxy.cfg
+Type=simple
+ExecStart=/usr/local/etc/3proxy/bin/3proxy /usr/local/etc/3proxy/3proxy.cfg
 Restart=always
+LimitNOFILE=65535
 
 [Install]
 WantedBy=multi-user.target
 EOF
-  systemctl daemon-reexec
-  systemctl enable 3proxy
+
+systemctl daemon-reexec
+systemctl daemon-reload
+
+WORKDIR="/home/proxy-installer"
+WORKDATA="${WORKDIR}/data.txt"
+mkdir -p "$WORKDIR"
+
+# Random helpers
+random() {
+	tr -dc A-Za-z0-9 </dev/urandom | head -c 5
+	echo
 }
 
-# ===== MAIN =====
-
-mkdir -p "$WORK_DIR"
-cd "$WORK_DIR"
-
-install_requirements
-install_3proxy
-create_systemd_service
-
-IPV4=$(curl -4 -s icanhazip.com)
-IPV6_PREFIX=$(curl -6 -s icanhazip.com | cut -d':' -f1-4)
+# Fix IPv6 prefix gen (must return a full /64 addr)
+gen64() {
+	suffix=$(hexdump -n 8 -e '/1 ":%02X"' /dev/urandom)
+	echo "$1${suffix,,}"
+}
 
 echo "[🌐] Lấy địa chỉ IPv4 và prefix IPv6..."
-echo "IPv4: $IPV4"
-echo "IPv6 Prefix: $IPV6_PREFIX"
+IP4=$(curl -4 -s icanhazip.com)
+IP6_PREFIX=$(curl -6 -s icanhazip.com | cut -f1-4 -d':' | tr -d '\n')
+IP6_PREFIX="${IP6_PREFIX}:"
 
-read -p "[❓] Bạn muốn tạo bao nhiêu proxy? " PROXY_COUNT
+echo "[❓] Bạn muốn tạo bao nhiêu proxy?"
+read -r COUNT
+
+FIRST_PORT=10000
+LAST_PORT=$((FIRST_PORT + COUNT - 1))
 
 echo "[🔢] Sinh dữ liệu proxy..."
-gen_data
-gen_config_3proxy
-gen_ifconfig_commands
-gen_firewall_rules
-gen_proxy_txt
+seq $FIRST_PORT $LAST_PORT | while read -r port; do
+    echo "usr$(random)/pass$(random)/$IP4/$port/$(gen64 "$IP6_PREFIX")"
+done > "$WORKDATA"
 
-echo "[🧩] Gán IPv6 vào interface $IPV6_INTERFACE..."
-bash "$WORK_DIR/assign_ipv6.sh"
+echo "[🧩] Gán IPv6 vào interface eth0..."
+awk -F "/" '{print $5}' "$WORKDATA" | while read -r ip; do
+    ip -6 addr add "$ip/64" dev eth0 || true
+done
 
-echo "[🔥] Mở port với firewalld..."
-bash "$WORK_DIR/firewall.sh"
-firewall-cmd --reload
+echo "[🔁] Cấu hình iptables..."
+awk -F "/" '{print "iptables -I INPUT -p tcp --dport " $4 " -j ACCEPT"}' "$WORKDATA" > "${WORKDIR}/boot_iptables.sh"
+chmod +x "${WORKDIR}/boot_iptables.sh"
+bash "${WORKDIR}/boot_iptables.sh"
 
-echo "[🚀] Khởi động 3proxy..."
-systemctl restart 3proxy
+echo "[⚙️] Tạo file cấu hình cho 3proxy..."
+cat > /usr/local/etc/3proxy/3proxy.cfg <<EOF
+daemon
+maxconn 1000
+nscache 65536
+timeouts 1 5 30 60 180 1800 15 60
+setgid 65535
+setuid 65535
+flush
+auth strong
 
-echo "[📦] Xuất file proxy.txt..."
-cat "$WORK_DIR/proxy.txt"
+users $(awk -F "/" '{printf "%s:CL:%s ", $1, $2}' "$WORKDATA")
+
+$(awk -F "/" '{print "auth strong\n" \
+"allow " $1 "\n" \
+"proxy -6 -n -a -p" $4 " -i" $3 " -e"$5 "\n" \
+"flush\n"}' "$WORKDATA")
+EOF
+
+echo "[💾] Ghi file proxy.txt..."
+awk -F "/" '{print $3 ":" $4 ":" $1 ":" $2}' "$WORKDATA" > "$WORKDIR/proxy.txt"
 
 echo "[☁️] Upload proxy.txt lên transfer.sh..."
-upload_to_transfersh
+ZIPPASS=$(random)
+cd "$WORKDIR" || exit
+zip --password "$ZIPPASS" proxy.zip proxy.txt > /dev/null
+UPLOAD_URL=$(curl --silent --upload-file proxy.zip https://transfer.sh/proxy.zip || true)
+
+echo
+echo "✅ Proxy đã được tạo thành công!"
+echo "📄 File: proxy.txt (IP:PORT:USER:PASS)"
+echo "🔗 Link tải: $UPLOAD_URL"
+echo "🔐 Mật khẩu giải nén: $ZIPPASS"
+
+echo "[🚀] Bật dịch vụ 3proxy..."
+systemctl enable --now 3proxy
+
