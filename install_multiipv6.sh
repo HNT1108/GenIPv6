@@ -14,7 +14,7 @@ function gen_ipv6_suffix() {
 }
 
 function install_packages() {
-  dnf install -y curl wget iproute network-manager iptables-services firewalld
+  dnf install -y curl wget iproute iptables-services firewalld
 }
 
 function detect_if() {
