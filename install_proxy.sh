@@ -9,6 +9,7 @@ dnf install -y git gcc make curl unzip wget net-tools iproute iptables zip > /de
 # ----------------- Tải & Build 3proxy -----------------
 echo "[⬇️] Tải và biên dịch 3proxy mới nhất..."
 cd /opt
+rm -rf 3proxy
 git clone https://github.com/z3APA3A/3proxy.git
 cd 3proxy
 make -f Makefile.Linux
