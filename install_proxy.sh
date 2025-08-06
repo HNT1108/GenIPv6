@@ -32,7 +32,16 @@ systemctl daemon-reload
 
 echo "[🌐] Lấy địa chỉ IPv4 và prefix IPv6..."
 IP4=$(curl -4 -s icanhazip.com)
-IP6_PREFIX=$(curl -6 -s icanhazip.com | cut -d':' -f1-4)
+
+# Tự động lấy interface và prefix IPv6 hợp lệ
+IFACE=$(ip -6 addr | awk '/inet6/ && /scope global/ {print $NF; exit}')
+FULL_IP6=$(ip -6 addr show dev "$IFACE" | awk '/inet6/ && /global/ {print $2; exit}')
+IP6_PREFIX=$(echo $FULL_IP6 | cut -d':' -f1-4)
+
+if [[ -z "$IP6_PREFIX" ]]; then
+    echo "❌ Không thể lấy prefix IPv6. Kiểm tra kết nối IPv6."
+    exit 1
+fi
 
 read -p "[❓] Bạn muốn tạo bao nhiêu proxy? " COUNT
 
@@ -43,13 +52,10 @@ mkdir -p $WORKDIR && cd $WORKDIR
 FIRST_PORT=10000
 LAST_PORT=$((FIRST_PORT + COUNT))
 
-# Random gen
 gen64() {
-    printf "$IP6_PREFIX:%x%x:%x%x:%x%x:%x%x\n" \
-        $((RANDOM % 16)) $((RANDOM % 16)) \
-        $((RANDOM % 16)) $((RANDOM % 16)) \
-        $((RANDOM % 16)) $((RANDOM % 16)) \
-        $((RANDOM % 16)) $((RANDOM % 16))
+    # Sinh ra địa chỉ IPv6 dạng PREFIX:x:x:x:x
+    printf "$IP6_PREFIX:%x:%x:%x:%x\n" \
+        $((RANDOM%65536)) $((RANDOM%65536)) $((RANDOM%65536)) $((RANDOM%65536))
 }
 
 random_str() {
@@ -65,10 +71,10 @@ for ((port=FIRST_PORT; port<LAST_PORT; port++)); do
     echo "$user/$pass/$IP4/$port/$ip6" >> $WORKDATA
 done
 
-echo "[🧩] Gán IPv6 vào interface eth0..."
+echo "[🧩] Gán IPv6 vào interface $IFACE..."
 while IFS=/ read -r user pass ip4 port ip6; do
-    ip -6 addr add "$ip6/64" dev eth0 || echo "❌ Không thể gán $ip6"
-done < <(cat $WORKDATA)
+    ip -6 addr add "$ip6/64" dev $IFACE || echo "❌ Không thể gán $ip6"
+done < $WORKDATA
 
 echo "[⚙️] Tạo file cấu hình 3proxy..."
 cat <<EOF > /usr/local/etc/3proxy/3proxy.cfg
@@ -91,10 +97,17 @@ echo "[📄] Tạo file proxy.txt..."
 awk -F/ '{print $3 ":" $4 ":" $1 ":" $2}' $WORKDATA > proxy.txt
 
 echo "[☁️] Upload proxy.txt lên transfer.sh..."
-zip --password "$PASS" proxy.zip proxy.txt
-URL=$(curl --upload-file proxy.zip https://transfer.sh/proxy.zip)
+PASS=$(random_str)
+zip --password "$PASS" proxy.zip proxy.txt >/dev/null
 
-echo
-echo "[✅] Proxy đã sẵn sàng!"
-echo "🔗 Link tải: $URL"
-echo "🔑 Mật khẩu: $PASS"
+# Kiểm tra kết nối transfer.sh
+curl -s https://transfer.sh/ --head >/dev/null
+if [[ $? -eq 0 ]]; then
+    URL=$(curl --upload-file proxy.zip https://transfer.sh/proxy.zip)
+    echo
+    echo "[✅] Proxy đã sẵn sàng!"
+    echo "🔗 Link tải: $URL"
+    echo "🔑 Mật khẩu: $PASS"
+else
+    echo "❌ Không thể kết nối tới transfer.sh. Vui lòng thử lại sau."
+fi
