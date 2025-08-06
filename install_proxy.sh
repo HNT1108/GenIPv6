@@ -24,7 +24,7 @@ WORKDATA="$WORKDIR/data.txt"
 # ----------------- Lấy IP -----------------
 echo "[🌐] Lấy địa chỉ IPv4 và prefix IPv6..."
 IP4=$(curl -4 -s icanhazip.com)
-IP6_PREFIX=$(curl -6 -s icanhazip.com | cut -d ':' -f1-4)
+IP6_PREFIX=$(ip -6 addr show dev eth0 | grep -oP 'inet6 \K[0-9a-f:]+' | grep -v '^fe80' | head -n1 | cut -d':' -f1-4)
 
 read -p "[❓] Bạn muốn tạo bao nhiêu proxy? " COUNT
 
