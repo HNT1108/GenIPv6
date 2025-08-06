@@ -10,21 +10,25 @@ function random_pw() {
 }
 
 function gen_ipv6_suffix() {
-  printf "%04x%04x%04x%04x" $((RANDOM&0xffff)) $((RANDOM&0xffff)) $((RANDOM&0xffff)) $((RANDOM&0xffff))
+  printf "%04x:%04x:%04x:%04x" $((RANDOM&0xffff)) $((RANDOM&0xffff)) $((RANDOM&0xffff)) $((RANDOM&0xffff))
 }
 
 function install_packages() {
-  dnf install -y curl wget iproute iptables-services firewalld
+  echo "[🔧] Cài gói cần thiết..."
+  dnf install -y curl wget iproute iptables-services firewalld >/dev/null
 }
 
 function detect_if() {
   IP4=$(curl -4 -s icanhazip.com)
   IP6_PREFIX=$(curl -6 -s icanhazip.com | cut -d: -f1-4)
   IFACE=$(ip -o addr show to $IP4 | awk '{print $2}' | head -n1)
+  echo "[🌐] IPv4: $IP4"
+  echo "[🌐] IPv6 Prefix: $IP6_PREFIX"
+  echo "[🔌] Interface: $IFACE"
 }
 
 function gen_data() {
-  echo "# ip4:port:user:pass"
+  echo "# ip4:port:user:pass:ipv6"
   for ((i=0; i<CNT; i++)); do
     port=$((FIRST_PORT + i))
     suffix=$(gen_ipv6_suffix)
@@ -36,22 +40,8 @@ function gen_data() {
 }
 
 function config_firewall() {
-  firewall-cmd --permanent --add-port=${FIRST_PORT}-$(($FIRST_PORT + CNT -1))/tcp
-  firewall-cmd --reload
-}
-
-function config_ifup() {
-  # tạo file systemd-network generator script
-  cat >${WORKDIR}/add_ipv6.sh <<EOF
-#!/bin/bash
-ip link add dummy-mipv6 type dummy
-ip link set dummy-mipv6 up
-EOF
-  chmod +x ${WORKDIR}/add_ipv6.sh
-  cat >> /etc/rc.d/rc.local <<EOF
-${WORKDIR}/boot_ifconfig.sh
-EOF
-  chmod +x /etc/rc.d/rc.local
+  firewall-cmd --permanent --add-port=${FIRST_PORT}-$(($FIRST_PORT + CNT -1))/tcp >/dev/null
+  firewall-cmd --reload >/dev/null
 }
 
 function gen_boot_ifconfig() {
@@ -73,7 +63,7 @@ daemon
 maxconn 10000
 nserver 1.1.1.1
 timeouts 1 5 30 60 180 1800 15 60
-users \$(cut -d: -f3,4 ${WORKDIR}/data.txt | tr ':' '\\:')
+users $(cut -d: -f3,4 ${WORKDIR}/data.txt | tr ':' '\\:')
 auth strong
 allow * * * *
 EOF
@@ -85,8 +75,8 @@ EOL
 }
 
 function install_3proxy() {
-  # ví dụ compile hoặc từ repo
-  dnf install -y 3proxy
+  echo "[⬇️] Cài 3proxy..."
+  dnf install -y 3proxy >/dev/null
 }
 
 function service_3proxy() {
@@ -106,13 +96,12 @@ EOF
   systemctl enable --now 3proxy
 }
 
-# main
+# === MAIN ===
 install_packages
 detect_if
 
-echo "[👀] Đang chuẩn bị tạo proxy..."
 if [[ -z "$CNT" ]]; then
-  read -rp "How many proxies to create? " CNT
+  read -rp "[❓] Nhập số lượng proxy cần tạo: " CNT
 fi
 
 mkdir -p "$WORKDIR"
@@ -124,5 +113,5 @@ install_3proxy
 gen_3proxy_cfg
 service_3proxy
 
-echo "Proxies generated in ${WORKDIR}/data.txt"
-echo "3proxy running."
+echo "[✅] Đã tạo xong proxy trong: ${WORKDIR}/data.txt"
+echo "[🚀] 3proxy đã khởi động!"
