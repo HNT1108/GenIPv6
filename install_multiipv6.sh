@@ -2,7 +2,7 @@
 set -euo pipefail
 
 WORKDIR="/opt/multiipv6"
-CNT=${1:-}
+CNT=${1:-""}
 FIRST_PORT=${2:-10000}
 
 function random_pw() {
@@ -110,6 +110,7 @@ EOF
 install_packages
 detect_if
 
+echo "[👀] Đang chuẩn bị tạo proxy..."
 if [[ -z "$CNT" ]]; then
   read -rp "How many proxies to create? " CNT
 fi
